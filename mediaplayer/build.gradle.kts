@@ -17,13 +17,19 @@ plugins {
 group = "io.github.kdroidfilter.composemediaplayer"
 
 val ref = System.getenv("GITHUB_REF") ?: ""
+
+// Version resolution, in order of precedence:
+//   1. -PprojectVersion=<x.y.z>  — used by the manually dispatched GitHub Packages publish
+//   2. a v-prefixed git tag       — used by the tag-triggered Maven Central publish
+//   3. "dev"                      — local development builds
 val projectVersion =
-    if (ref.startsWith("refs/tags/")) {
-        val tag = ref.removePrefix("refs/tags/")
-        if (tag.startsWith("v")) tag.substring(1) else tag
-    } else {
-        "dev"
-    }
+    providers.gradleProperty("projectVersion").orNull
+        ?: if (ref.startsWith("refs/tags/")) {
+            val tag = ref.removePrefix("refs/tags/")
+            if (tag.startsWith("v")) tag.substring(1) else tag
+        } else {
+            "dev"
+        }
 
 kotlin {
     jvmToolchain(17)
@@ -262,8 +268,47 @@ mavenPublishing {
     publishToMavenCentral()
 
     // Only sign publications in CI environments to avoid requiring local GPG signing setup.
-    if (System.getenv("CI") != null) {
+    // The key check also keeps the GitHub Packages publish working: that registry does not need
+    // signatures and the workflow does not carry GPG secrets, so signing stays off there.
+    if (System.getenv("CI") != null && System.getenv("ORG_GRADLE_PROJECT_signingInMemoryKey") != null) {
         signAllPublications()
     }
 
+}
+
+/**
+ * Secondary publication target: GitHub Packages on the fork.
+ *
+ * Publish with `./gradlew :mediaplayer:publishAllPublicationsToGitHubPackagesRepository`, which
+ * targets only this repository and never Maven Central. Credentials come from the environment
+ * (`GITHUB_ACTOR` / `GITHUB_TOKEN`, both provided automatically inside GitHub Actions) or from the
+ * `gpr.user` / `gpr.key` Gradle properties for local runs.
+ *
+ * `githubPackagesUrl` can be overridden to publish into a local directory for verification, e.g.
+ * `-PgithubPackagesUrl=file:///tmp/repo`, which exercises the whole publication without uploading.
+ */
+publishing {
+    repositories {
+        val githubPackagesUrl =
+            providers.gradleProperty("githubPackagesUrl")
+                .getOrElse("https://maven.pkg.github.com/itboy87/ComposeMediaPlayer")
+
+        maven {
+            name = "GitHubPackages"
+            url = uri(githubPackagesUrl)
+
+            // The `file:` protocol rejects any authentication scheme, so credentials are attached
+            // only for real remote publishes.
+            if (!githubPackagesUrl.startsWith("file:")) {
+                credentials {
+                    username =
+                        providers.gradleProperty("gpr.user").orNull
+                            ?: providers.environmentVariable("GITHUB_ACTOR").getOrElse("")
+                    password =
+                        providers.gradleProperty("gpr.key").orNull
+                            ?: providers.environmentVariable("GITHUB_TOKEN").getOrElse("")
+                }
+            }
+        }
+    }
 }

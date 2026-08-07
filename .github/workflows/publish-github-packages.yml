@@ -1,0 +1,78 @@
+name: Publish to GitHub Packages
+
+# Manually dispatched: no tag or release is required, the version is typed at run time.
+#
+# The Kotlin targets could all be built on a single macOS runner, but the desktop (jvm) artifact
+# bundles native players for Windows, Linux and macOS. Those are built on their own runners first
+# and downloaded here, so the published jar carries a complete, current set.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, without a leading v (e.g. 0.9.0)'
+        required: true
+        type: string
+
+jobs:
+  build-natives:
+    uses: ./.github/workflows/build-natives.yml
+
+  publish:
+    needs: build-natives
+    runs-on: macos-latest
+
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Download all native libraries
+        uses: actions/download-artifact@v8
+        with:
+          path: mediaplayer/src/jvmMain/resources/composemediaplayer/native/
+          pattern: native-*
+          merge-multiple: true
+
+      - name: Verify all natives present
+        run: |
+          EXPECTED=(
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-aarch64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/darwin-x86-64/libNativeVideoPlayer.dylib"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-x86-64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/linux-aarch64/libNativeVideoPlayer.so"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-x86-64/NativeVideoPlayer.dll"
+            "mediaplayer/src/jvmMain/resources/composemediaplayer/native/win32-arm64/NativeVideoPlayer.dll"
+          )
+          MISSING=0
+          for f in "${EXPECTED[@]}"; do
+            if [ -f "$f" ]; then
+              echo "OK: $f ($(wc -c < "$f") bytes)"
+            else
+              echo "MISSING: $f" >&2
+              MISSING=1
+            fi
+          done
+          if [ "$MISSING" = "1" ]; then exit 1; fi
+
+      - name: Set up JDK
+        uses: actions/setup-java@v5
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # Targets only the GitHubPackages repository, so Maven Central is never touched by this
+      # workflow even though the Maven Central publication is still configured in the build.
+      - name: Publish to GitHub Packages
+        run: |
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          echo "Publishing version $VERSION"
+          ./gradlew :mediaplayer:publishAllPublicationsToGitHubPackagesRepository \
+            --no-configuration-cache \
+            -PprojectVersion="$VERSION"
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
