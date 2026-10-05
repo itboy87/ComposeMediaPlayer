@@ -80,7 +80,12 @@ private const val POSITION_POLL_INTERVAL_MS = 200L
  * AVFoundation's display aspect ratio (pixel-aspect-ratio / clean-aperture corrected) so
  * anamorphic content renders correctly — see [displayAspectRatio].
  */
-class MacVideoPlayerState : VideoPlayerState {
+class MacVideoPlayerState @JvmOverloads constructor(
+    private val metadataTimeoutMillis: Long = DEFAULT_MAC_METADATA_TIMEOUT_MILLIS,
+) : VideoPlayerState {
+    init {
+        require(metadataTimeoutMillis > 0) { "Metadata timeout must be positive." }
+    }
     /** Native AVFoundation player. AtomicLong allows lock-free reads from the frame hot path. */
     private val playerPtrAtomic = AtomicLong(0L)
     private val playerPtr: Long get() = playerPtrAtomic.get()
@@ -430,8 +435,17 @@ class MacVideoPlayerState : VideoPlayerState {
                 // Phase 2 (UNLOCKED): AVFoundation loads asynchronously, so these polls can take
                 // several seconds. Running them outside mediaOperationMutex keeps volume/other
                 // operations responsive during a slow open.
-                pollDimensionsUntilReady(ptr)
-                val resolvedDuration = pollDurationUntilReady(ptr)
+                val dimensionsReady = pollDimensionsUntilReady(ptr, myToken)
+                if (isDisposing.get() || myToken != openToken.get()) return@launch
+                if (!dimensionsReady) {
+                    mediaOperationMutex.withLock {
+                        if (!isDisposing.get() && myToken == openToken.get()) {
+                            setError("Failed to retrieve video size")
+                        }
+                    }
+                    return@launch
+                }
+                val resolvedDuration = pollDurationUntilReady(ptr, myToken)
                 if (isDisposing.get() || myToken != openToken.get()) return@launch
 
                 // Phase 3 (locked): finalize metadata and start the pipeline.
@@ -493,35 +507,32 @@ class MacVideoPlayerState : VideoPlayerState {
                 }
             } catch (e: Exception) {
                 if (e is CancellationException) throw e
-                setError("Error while opening media: ${e.message}")
-                _hasMedia = false
+                if (!isDisposing.get() && myToken == openToken.get()) {
+                    setError("Error while opening media: ${e.message}")
+                    _hasMedia = false
+                }
             } finally {
                 // Only clear the flag if a newer open hasn't taken over.
-                if (myToken == openToken.get()) isOpening.set(false)
-                if (!_hasMedia) isLoading = false
+                if (myToken == openToken.get()) {
+                    isOpening.set(false)
+                    if (!_hasMedia) isLoading = false
+                }
             }
         }
     }
 
     /**
-     * Loops several times (every 250 ms) until width/height are no longer zero, or until
-     * [maxAttempts] is reached.
+     * AVFoundation loads remote metadata asynchronously. Keep the same native player alive for
+     * up to [metadataTimeoutMillis], returning immediately when both dimensions become available.
      */
     private suspend fun pollDimensionsUntilReady(
         ptr: Long,
-        maxAttempts: Int = 20,
-    ) {
-        for (attempt in 1..maxAttempts) {
-            val width = MacNativeBridge.nGetFrameWidth(ptr)
-            val height = MacNativeBridge.nGetFrameHeight(ptr)
-            if (width > 0 && height > 0) {
-                macLogger.d { "Dimensions validated (w=$width, h=$height) after $attempt attempts" }
-                return
-            }
-            delay(250)
-        }
-        macLogger.e { "Unable to retrieve valid dimensions after $maxAttempts attempts" }
-    }
+        token: Long,
+    ): Boolean = awaitMacVideoDimensions(
+        timeoutMillis = metadataTimeoutMillis,
+        isCurrentOpen = { !isDisposing.get() && token == openToken.get() && ptr == playerPtr },
+        readDimensions = { MacNativeBridge.nGetFrameWidth(ptr) to MacNativeBridge.nGetFrameHeight(ptr) },
+    )
 
     /**
      * Reads the media duration from the native player, normalizing AVFoundation's states:
@@ -545,9 +556,11 @@ class MacVideoPlayerState : VideoPlayerState {
      */
     private suspend fun pollDurationUntilReady(
         ptr: Long,
+        token: Long,
         maxAttempts: Int = 20,
     ): Double {
         for (attempt in 1..maxAttempts) {
+            if (isDisposing.get() || token != openToken.get() || ptr != playerPtr) return 0.0
             val d = readDuration(ptr)
             if (d > 0.0) {
                 macLogger.d { "Duration resolved ($d s) after $attempt attempts" }

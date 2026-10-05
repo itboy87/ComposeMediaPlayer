@@ -112,6 +112,7 @@ kotlin {
         }
 
         jvmTest.dependencies {
+            runtimeOnly(compose.desktop.currentOs)
             implementation(kotlin("test"))
             implementation(kotlin("test-junit"))
             implementation(libs.kotlinx.coroutines.test)
@@ -218,6 +219,15 @@ val buildNativeLinux by tasks.registering(Exec::class) {
     outputs.dir(nativeResourceDir)
     workingDir(nativeDir)
     commandLine("bash", "build.sh")
+}
+
+tasks.withType<Test>().configureEach {
+    if (name == "jvmTest") {
+        inputs.property(
+            "nativeMetadataStartupTest",
+            providers.environmentVariable("COMPOSE_MEDIA_PLAYER_RUN_NATIVE_STARTUP_TEST").orElse("0"),
+        )
+    }
 }
 
 tasks.named("jvmProcessResources") {

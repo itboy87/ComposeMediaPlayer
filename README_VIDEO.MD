@@ -401,6 +401,23 @@ Platform behaviour:
 | Windows — local files | The whole duration, which is always available on disk. |
 | Windows — progressive network | **Not supported.** The Media Foundation source reader exposes no buffering data, so `isBufferedRangeSupported` is `false`. |
 
+### macOS metadata startup
+
+The JVM macOS player waits up to 30 seconds for AVFoundation to discover video dimensions.
+Ready media starts immediately; slow first requests keep the same native player while loading.
+Timeouts still report `Failed to retrieve video size`. Superseded opens and disposal stop polling
+without allowing an older open to clear the new source's loading state.
+
+The standard state factory uses this default. Direct macOS integrations can configure it with
+`MacVideoPlayerState(metadataTimeoutMillis = 45_000L)`; the existing no-argument constructor is
+preserved. The timeout must be positive. Windows, Android, and the buffered-range API are unchanged.
+
+Run deterministic deadline/cancellation tests with
+`./gradlew :mediaplayer:jvmTest --tests '*MacMetadataStartupTest'`.
+Run the macOS native delayed-stream regressions with
+`COMPOSE_MEDIA_PLAYER_RUN_NATIVE_STARTUP_TEST=1 ./gradlew :mediaplayer:jvmTest --tests '*MacMetadataStartupNativeTest'`.
+The GitHub Packages workflow runs both before publication.
+
 ### Error Handling
 
 In case of an error, you can display it using `println`:
