@@ -59,7 +59,9 @@ def build_mac(arch, output, sdk):
   if destination.exists(): return
   destination.parent.mkdir(parents=True,exist_ok=True)
   run('lipo',original,'-thin',arch,'-output',destination)
-  subprocess.run(['codesign','--remove-signature',str(destination)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+  # Retain LC_CODE_SIGNATURE until relocation. Older codesign removal leaves
+  # alignment padding at the end of __LINKEDIT that install_name_tool rejects.
+  # All staged libraries are signed again after their load commands are final.
  def deps(file):
   if file in copied: return
   copied[file]=True
