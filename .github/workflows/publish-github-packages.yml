@@ -17,8 +17,11 @@ jobs:
   build-natives:
     uses: ./.github/workflows/build-natives.yml
 
+  native-playback:
+    uses: ./.github/workflows/native-dash.yml
+
   publish:
-    needs: build-natives
+    needs: [build-natives, native-playback]
     runs-on: macos-latest
 
     permissions:
