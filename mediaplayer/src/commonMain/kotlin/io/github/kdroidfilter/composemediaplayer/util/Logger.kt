@@ -50,15 +50,15 @@ private fun Int.pad(len: Int = 2): String = toString().padStart(len, '0')
 internal class TaggedLogger(
     private val tag: String,
 ) {
-    fun v(message: () -> String) = verboseln { "[$tag] ${message()}" }
+    fun v(message: () -> String) = verboseln { "[$tag] ${redactLog(message())}" }
 
-    fun d(message: () -> String) = debugln { "[$tag] ${message()}" }
+    fun d(message: () -> String) = debugln { "[$tag] ${redactLog(message())}" }
 
-    fun i(message: () -> String) = infoln { "[$tag] ${message()}" }
+    fun i(message: () -> String) = infoln { "[$tag] ${redactLog(message())}" }
 
-    fun w(message: () -> String) = warnln { "[$tag] ${message()}" }
+    fun w(message: () -> String) = warnln { "[$tag] ${redactLog(message())}" }
 
-    fun e(message: () -> String) = errorln { "[$tag] ${message()}" }
+    fun e(message: () -> String) = errorln { "[$tag] ${redactLog(message())}" }
 }
 
 // -- Top-level logging functions --------------------------------------------
@@ -67,7 +67,7 @@ internal fun verboseln(message: () -> String) {
     if (allowComposeMediaPlayerLogging &&
         composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.VERBOSE
     ) {
-        println("[${getCurrentTimestamp()}] V: ${message()}")
+        println("[${getCurrentTimestamp()}] V: ${redactLog(message())}")
     }
 }
 
@@ -75,7 +75,7 @@ internal fun debugln(message: () -> String) {
     if (allowComposeMediaPlayerLogging &&
         composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.DEBUG
     ) {
-        println("[${getCurrentTimestamp()}] D: ${message()}")
+        println("[${getCurrentTimestamp()}] D: ${redactLog(message())}")
     }
 }
 
@@ -83,7 +83,7 @@ internal fun infoln(message: () -> String) {
     if (allowComposeMediaPlayerLogging &&
         composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.INFO
     ) {
-        println("[${getCurrentTimestamp()}] I: ${message()}")
+        println("[${getCurrentTimestamp()}] I: ${redactLog(message())}")
     }
 }
 
@@ -91,7 +91,7 @@ internal fun warnln(message: () -> String) {
     if (allowComposeMediaPlayerLogging &&
         composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.WARN
     ) {
-        println("[${getCurrentTimestamp()}] W: ${message()}")
+        println("[${getCurrentTimestamp()}] W: ${redactLog(message())}")
     }
 }
 
@@ -99,6 +99,11 @@ internal fun errorln(message: () -> String) {
     if (allowComposeMediaPlayerLogging &&
         composeMediaPlayerLoggingLevel <= ComposeMediaPlayerLoggingLevel.ERROR
     ) {
-        println("[${getCurrentTimestamp()}] E: ${message()}")
+        println("[${getCurrentTimestamp()}] E: ${redactLog(message())}")
     }
 }
+
+/** Redact request URLs and bearer credentials even when callers opt in to diagnostic logging. */
+internal fun redactLog(message: String): String = message
+    .replace(Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE), "[url]")
+    .replace(Regex("Bearer\\s+[^\\s,;)}]+", RegexOption.IGNORE_CASE), "[credential]")

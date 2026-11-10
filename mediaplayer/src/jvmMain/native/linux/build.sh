@@ -31,3 +31,5 @@ case "$ARCH" in
         echo "Output: $OUTPUT_DIR/linux-$ARCH/libNativeVideoPlayer.so"
         ;;
 esac
+
+python3 "$SCRIPT_DIR/../../../../../tools/legacy_native_manifest.py" --write linux "$OUTPUT_DIR"

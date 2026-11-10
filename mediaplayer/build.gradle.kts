@@ -170,17 +170,12 @@ val nativeResourceDir = layout.projectDirectory.dir("src/jvmMain/resources/compo
 val buildNativeMacOs by tasks.registering(Exec::class) {
     description = "Compiles the Swift native library into macOS dylibs (arm64 + x64)"
     group = "build"
-    val hasPrebuilt =
-        nativeResourceDir
-            .dir("darwin-aarch64")
-            .file("libNativeVideoPlayer.dylib")
-            .asFile
-            .exists()
-    enabled = Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
+    enabled = Os.isFamily(Os.FAMILY_MAC)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/macos")
     inputs.dir(nativeDir)
-    outputs.dir(nativeResourceDir)
+    inputs.file(rootProject.file("tools/legacy_native_manifest.py"))
+    outputs.dirs(nativeResourceDir.dir("darwin-aarch64"), nativeResourceDir.dir("darwin-x86-64"))
     workingDir(nativeDir)
     commandLine("bash", "build.sh")
 }
@@ -188,17 +183,12 @@ val buildNativeMacOs by tasks.registering(Exec::class) {
 val buildNativeWindows by tasks.registering(Exec::class) {
     description = "Compiles the C++ native library into Windows DLLs (x64 + ARM64)"
     group = "build"
-    val hasPrebuilt =
-        nativeResourceDir
-            .dir("win32-x86-64")
-            .file("NativeVideoPlayer.dll")
-            .asFile
-            .exists()
-    enabled = Os.isFamily(Os.FAMILY_WINDOWS) && !hasPrebuilt
+    enabled = Os.isFamily(Os.FAMILY_WINDOWS)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/windows")
     inputs.dir(nativeDir)
-    outputs.dir(nativeResourceDir)
+    inputs.file(rootProject.file("tools/legacy_native_manifest.py"))
+    outputs.dirs(nativeResourceDir.dir("win32-arm64"), nativeResourceDir.dir("win32-x86-64"))
     workingDir(nativeDir)
     commandLine("cmd", "/c", nativeDir.file("build.bat").asFile.absolutePath)
 }
@@ -206,23 +196,37 @@ val buildNativeWindows by tasks.registering(Exec::class) {
 val buildNativeLinux by tasks.registering(Exec::class) {
     description = "Compiles the C native library into Linux .so (GStreamer + JNI)"
     group = "build"
-    val hasPrebuilt =
-        nativeResourceDir
-            .dir("linux-x86-64")
-            .file("libNativeVideoPlayer.so")
-            .asFile
-            .exists()
-    enabled = Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC) && !hasPrebuilt
+    enabled = Os.isFamily(Os.FAMILY_UNIX) && !Os.isFamily(Os.FAMILY_MAC)
 
     val nativeDir = layout.projectDirectory.dir("src/jvmMain/native/linux")
     inputs.dir(nativeDir)
-    outputs.dir(nativeResourceDir)
+    inputs.file(rootProject.file("tools/legacy_native_manifest.py"))
+    outputs.dir(nativeResourceDir.dir(if (System.getProperty("os.arch").contains("aarch64")) "linux-aarch64" else "linux-x86-64"))
     workingDir(nativeDir)
     commandLine("bash", "build.sh")
 }
 
 tasks.withType<Test>().configureEach {
     if (name == "jvmTest") {
+        inputs.property("nativePublicSamples", providers.environmentVariable("COMPOSE_MEDIA_PLAYER_RUN_PUBLIC_TEST").orElse("0"))
+        val publicCdm = providers.environmentVariable("COMPOSE_MEDIA_PLAYER_WIDEVINE_CDM").orNull
+        inputs.property("publicWidevineEnabled", publicCdm != null)
+        if (publicCdm != null) inputs.file(publicCdm).withPropertyName("publicWidevineCdm")
+        if (providers.environmentVariable("COMPOSE_MEDIA_PLAYER_RUN_PUBLIC_TEST").orNull == "1") {
+            outputs.upToDateWhen { false }
+            outputs.cacheIf("Public network tests must execute") { false }
+        }
+        val widevineConfig = providers.environmentVariable("COMPOSE_MEDIA_PLAYER_WIDEVINE_CONFIG").orNull
+        inputs.property("nativeWidevineTestEnabled", widevineConfig != null)
+        if (widevineConfig != null) {
+            inputs.file(widevineConfig).withPropertyName("nativeWidevineTestConfiguration")
+            outputs.cacheIf("Private Widevine integration tests are not cached") { false }
+        }
+        providers.environmentVariable("COMPOSE_MEDIA_PLAYER_RUNTIME_DIR").orNull?.let { systemProperty("composemediaplayer.runtimeDir", it) }
+        inputs.property(
+            "nativeDashTest",
+            providers.environmentVariable("COMPOSE_MEDIA_PLAYER_RUN_DASH_TEST").orElse("0"),
+        )
         inputs.property(
             "nativeMetadataStartupTest",
             providers.environmentVariable("COMPOSE_MEDIA_PLAYER_RUN_NATIVE_STARTUP_TEST").orElse("0"),
@@ -322,3 +326,64 @@ publishing {
         }
     }
 }
+
+// Complete runtime resources are generated, never checked into source resources.
+val mediaRuntimeResources = layout.buildDirectory.dir("generated/mediaResources")
+val buildNativeMediaRuntime by tasks.registering(Exec::class) {
+    group = "build"
+    description = "Builds the pinned, relocatable DASH/ASS runtime for the host architecture"
+    enabled = Os.isFamily(Os.FAMILY_MAC) || Os.isFamily(Os.FAMILY_WINDOWS)
+    inputs.dir("src/jvmMain/native/shared")
+    inputs.files(rootProject.file("tools/build_media_runtime.py"), rootProject.file("tools/download_native.py"))
+    outputs.dir(mediaRuntimeResources)
+    workingDir(rootProject.projectDir)
+    commandLine(if (Os.isFamily(Os.FAMILY_WINDOWS)) "python" else "python3", "tools/build_media_runtime.py", "--output", mediaRuntimeResources.get().dir("composemediaplayer/runtime").asFile.absolutePath)
+}
+kotlin.sourceSets.named("jvmMain") { resources.srcDir(mediaRuntimeResources) }
+tasks.named("jvmProcessResources") { dependsOn(buildNativeMediaRuntime) }
+val extractMediaRuntime by tasks.registering(Copy::class) {
+    description = "Stages native files for downstream application signing; sign after extraction"
+    dependsOn(buildNativeMediaRuntime)
+    from(mediaRuntimeResources)
+    into(layout.buildDirectory.dir("applicationNativeResources"))
+}
+
+// CI prebuilt bundles are checked against the current checkout before resource packaging.
+val verifyPrebuiltMediaRuntimes by tasks.registering(Exec::class) {
+    dependsOn(buildNativeMediaRuntime)
+    inputs.files(fileTree(nativeResourceDir.dir("runtime")))
+    inputs.dir("src/jvmMain/native/shared")
+    inputs.files(rootProject.file("tools/build_media_runtime.py"), rootProject.file("tools/verify_runtime_set.py"))
+    workingDir(rootProject.projectDir)
+    commandLine(if (Os.isFamily(Os.FAMILY_WINDOWS)) "python" else "python3", "tools/verify_runtime_set.py", nativeResourceDir.dir("runtime").asFile.absolutePath, mediaRuntimeResources.get().dir("composemediaplayer/runtime").asFile.absolutePath)
+}
+val hostArm = System.getProperty("os.arch").lowercase().let { it.contains("aarch64") || it.contains("arm64") }
+val hostRuntimePlatform = when {
+    Os.isFamily(Os.FAMILY_MAC) -> if (hostArm) "darwin-aarch64" else "darwin-x86-64"
+    Os.isFamily(Os.FAMILY_WINDOWS) -> if (hostArm) "win32-arm64" else "win32-x86-64"
+    else -> "linux"
+}
+tasks.named<ProcessResources>("jvmProcessResources") {
+    dependsOn(verifyPrebuiltMediaRuntimes)
+    exclude("composemediaplayer/native/runtime/**")
+    from(nativeResourceDir.dir("runtime")) {
+        exclude("$hostRuntimePlatform/**")
+        into("composemediaplayer/runtime")
+    }
+}
+val verifyPublicationMediaRuntimes by tasks.registering(Exec::class) {
+    dependsOn(buildNativeMediaRuntime, verifyPrebuiltMediaRuntimes)
+    workingDir(rootProject.projectDir)
+    commandLine(if (Os.isFamily(Os.FAMILY_WINDOWS)) "python" else "python3", "tools/verify_runtime_set.py", "--require-all",
+        nativeResourceDir.dir("runtime").asFile.absolutePath, mediaRuntimeResources.get().dir("composemediaplayer/runtime").asFile.absolutePath)
+}
+tasks.configureEach {
+    if (name.startsWith("publishJvmPublication")) dependsOn(verifyPublicationMediaRuntimes)
+}
+
+val verifyLegacyNativeSources by tasks.registering(Exec::class) {
+    dependsOn(buildNativeMacOs, buildNativeWindows, buildNativeLinux)
+    workingDir(rootProject.projectDir)
+    commandLine(if (Os.isFamily(Os.FAMILY_WINDOWS)) "python" else "python3", "tools/legacy_native_manifest.py", "--verify", nativeResourceDir.asFile.absolutePath)
+}
+tasks.named("jvmProcessResources") { dependsOn(verifyLegacyNativeSources) }

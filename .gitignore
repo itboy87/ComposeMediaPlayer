@@ -30,3 +30,7 @@ Pods/
 /sample/composeApp/debug/
 NUL
 .claude/
+
+# Python native build tools
+__pycache__/
+*.pyc

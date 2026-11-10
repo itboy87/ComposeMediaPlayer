@@ -23,6 +23,14 @@ jobs:
         env:
           NATIVE_LIBS_OUTPUT_DIR: ${{ github.workspace }}/build/nativeLibs
 
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+      - name: Build Windows DASH runtimes
+        shell: bash
+        run: |
+          python tools/build_media_runtime.py --arch x86_64 --output build/nativeLibs/runtime
+          python tools/build_media_runtime.py --arch arm64 --output build/nativeLibs/runtime
       - name: Verify Windows natives
         shell: bash
         run: |
@@ -57,6 +65,10 @@ jobs:
         env:
           NATIVE_LIBS_OUTPUT_DIR: ${{ github.workspace }}/build/nativeLibs
 
+      - name: Build macOS DASH runtimes
+        run: |
+          python3 tools/build_media_runtime.py --arch arm64 --output build/nativeLibs/runtime
+          python3 tools/build_media_runtime.py --arch x86_64 --output build/nativeLibs/runtime
       - name: Verify macOS natives
         run: |
           for f in \

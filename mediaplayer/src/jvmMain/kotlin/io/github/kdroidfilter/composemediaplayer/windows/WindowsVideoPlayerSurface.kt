@@ -11,7 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntSize
-import io.github.kdroidfilter.composemediaplayer.subtitle.ComposeSubtitleLayer
+import io.github.kdroidfilter.composemediaplayer.desktop.DesktopSubtitleLayer
 import io.github.kdroidfilter.composemediaplayer.util.drawScaledImage
 import io.github.kdroidfilter.composemediaplayer.util.toCanvasModifier
 import io.github.kdroidfilter.composemediaplayer.util.toTimeMs
@@ -59,11 +59,11 @@ fun WindowsVideoPlayerSurface(
                             playerState.metadata.height,
                         ),
                 ) {
-                    drawScaledImage(
-                        image = frame,
+                    frame.draw { image -> drawScaledImage(
+                        image = image,
                         dstSize = IntSize(size.width.toInt(), size.height.toInt()),
                         contentScale = contentScale,
-                    )
+                    ) }
                 }
             }
 
@@ -79,7 +79,7 @@ fun WindowsVideoPlayerSurface(
                 // Calculate duration in milliseconds
                 val durationMs = playerState.durationText.toTimeMs()
 
-                ComposeSubtitleLayer(
+                DesktopSubtitleLayer(
                     currentTimeMs = currentTimeMs,
                     durationMs = durationMs,
                     isPlaying = playerState.isPlaying,

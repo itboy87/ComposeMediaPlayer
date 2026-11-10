@@ -49,16 +49,16 @@ fun ComposeSubtitleLayer(
     var subtitles by remember { mutableStateOf<SubtitleCueList?>(null) }
 
     // Load subtitles when the subtitle track changes
-    LaunchedEffect(subtitleTrack) {
+    LaunchedEffect(subtitleTrack, subtitlesEnabled) {
         subtitles =
             if (subtitleTrack != null && subtitlesEnabled) {
                 try {
                     withContext(Dispatchers.Default) {
                         // Load and parse the subtitle file
-                        val content = loadSubtitleContent(subtitleTrack.src)
+                        val content = loadSubtitleContent(subtitleTrack.src, subtitleTrack.headers)
 
                         // Determine the subtitle format based on file extension and content
-                        val isSrtByExtension = subtitleTrack.src.endsWith(".srt", ignoreCase = true)
+                        val isSrtByExtension = (subtitleTrack.format.equals("srt", true) || subtitleTrack.src.substringBefore('?').endsWith(".srt", ignoreCase = true))
 
                         // Check content for SRT format (typically starts with a number followed by timing)
                         val isSrtByContent =
@@ -81,7 +81,7 @@ fun ComposeSubtitleLayer(
                             WebVttParser.parse(content)
                         }
                     }
-                } catch (e: Exception) {
+                } catch (cancel: kotlinx.coroutines.CancellationException) { throw cancel } catch (e: Exception) {
                     // If there's an error loading or parsing the subtitle file,
                     // return an empty subtitle list
                     SubtitleCueList()
@@ -117,3 +117,5 @@ fun ComposeSubtitleLayer(
  * This is implemented in a platform-specific way.
  */
 expect suspend fun loadSubtitleContent(src: String): String
+
+expect suspend fun loadSubtitleContent(src: String, headers: Map<String, String>): String

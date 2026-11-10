@@ -48,26 +48,23 @@ internal object NativeLibraryLoader {
 
         val resourceUrl = callerClass.classLoader?.getResource(resourcePath) ?: return null
 
-        val cacheDir = resolveCacheDir(platform)
-        cacheDir.mkdirs()
+        val bytes = resourceUrl.openStream().use { it.readBytes() }
+        fun hash(data: ByteArray) = java.security.MessageDigest.getInstance("SHA-256").digest(data).joinToString("") { "%02x".format(it) }
+        val digest = hash(bytes)
+        val cacheDir = File(resolveCacheDir(platform), digest)
+        Files.createDirectories(cacheDir.toPath())
         val cachedFile = File(cacheDir, fileName)
-
-        // Validate cache: re-extract if size differs or file is missing
-        val resourceSize = resourceUrl.openConnection().contentLengthLong
-        if (cachedFile.exists() && cachedFile.length() == resourceSize) {
-            return cachedFile
-        }
-
-        // Atomic extract: write to temp then move
-        val tmpFile = File(cacheDir, "$fileName.tmp")
-        try {
-            resourceUrl.openStream().use { input ->
-                Files.copy(input, tmpFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        java.nio.channels.FileChannel.open(File(cacheDir, ".extract.lock").toPath(), java.nio.file.StandardOpenOption.CREATE, java.nio.file.StandardOpenOption.WRITE).use { channel ->
+            channel.lock().use {
+                if (!cachedFile.exists() || hash(cachedFile.readBytes()) != digest) {
+                    val temporary = Files.createTempFile(cacheDir.toPath(), fileName, ".tmp")
+                    try {
+                        Files.write(temporary, bytes)
+                        Files.move(temporary, cachedFile.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+                        cachedFile.setExecutable(true)
+                    } finally { Files.deleteIfExists(temporary) }
+                }
             }
-            Files.move(tmpFile.toPath(), cachedFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            cachedFile.setExecutable(true)
-        } finally {
-            tmpFile.delete()
         }
 
         return cachedFile

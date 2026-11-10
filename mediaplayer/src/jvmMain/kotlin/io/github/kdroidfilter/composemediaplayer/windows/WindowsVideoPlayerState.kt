@@ -6,7 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asComposeImageBitmap
+import io.github.kdroidfilter.composemediaplayer.desktop.OwnedVideoFrame
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -222,7 +222,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
     // Current frame management
     private var _currentFrame: Bitmap? by mutableStateOf(null)
     private val bitmapLock = ReentrantReadWriteLock()
-    internal val currentFrameState = mutableStateOf<ImageBitmap?>(null)
+    internal val currentFrameState = mutableStateOf<OwnedVideoFrame?>(null)
 
     // Aspect ratio property
     override val aspectRatio: Float
@@ -444,6 +444,7 @@ class WindowsVideoPlayerState : VideoPlayerState {
         // once Compose (and any other holder) drops its reference.
         bitmapLock.write {
             _currentFrame = null
+            currentFrameState.value?.close()
             currentFrameState.value = null
 
             for (i in skiaBitmaps.indices) skiaBitmaps[i] = null
@@ -952,8 +953,12 @@ class WindowsVideoPlayerState : VideoPlayerState {
                 frameReceived = true
 
                 bitmapLock.write {
-                    _currentFrame = frameData.bitmap
-                    currentFrameState.value = frameData.bitmap.asComposeImageBitmap()
+                    if (!isDisposing.get()) {
+                        _currentFrame = frameData.bitmap
+                        val old = currentFrameState.value
+                        currentFrameState.value = OwnedVideoFrame(org.jetbrains.skia.Image.makeFromBitmap(frameData.bitmap))
+                        old?.close()
+                    }
                 }
 
                 _currentTime = frameData.timestamp

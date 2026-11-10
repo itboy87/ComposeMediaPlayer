@@ -13,6 +13,10 @@ package io.github.kdroidfilter.composemediaplayer
  * - `UnknownError`: Covers any issues that do not fit into the other categories.
  */
 sealed class VideoPlayerError {
+    data class DrmError(val reason: Reason, val message: String) : VideoPlayerError() {
+        enum class Reason { CLIENT_MISSING, CLIENT_INCOMPATIBLE, LICENSE_REJECTED, LICENSE_EXPIRED, UNSUPPORTED_PROTECTION, DECRYPTION_FAILED }
+    }
+
     data class CodecError(
         val message: String,
     ) : VideoPlayerError()

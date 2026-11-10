@@ -18,6 +18,8 @@
 
 For the audio module, see [README_AUDIO.MD](README_AUDIO.MD).
 
+Desktop DASH, app-supplied Widevine CDMs, and styled ASS subtitles are documented in [the desktop integration guide](docs/desktop-dash.md). See [native validation results](docs/desktop-dash-validation.md) for the platforms actually exercised.
+
 The video player leverages:
 
 - **GStreamer** (via JNI) for Linux

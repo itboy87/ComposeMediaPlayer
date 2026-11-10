@@ -8,6 +8,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.util.PipResult
 import io.github.vinceglb.filekit.PlatformFile
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 /**
  * Represents the state and controls for a video player. This class provides properties
@@ -22,6 +24,20 @@ import io.github.vinceglb.filekit.PlatformFile
  */
 @Stable
 interface VideoPlayerState {
+    /** Source-correlated lifecycle notifications. Provider lease management remains caller-owned. */
+    val events: Flow<PlaybackEvent> get() = emptyFlow()
+
+    /** Configured source loading is implemented by the macOS/Windows desktop facade. */
+    fun openSource(source: MediaSource, initializeplayerState: InitialPlayerState = InitialPlayerState.PLAY) {
+        require(source.headers.isEmpty() && source.widevine == null && source.preferredAudioLanguage == null) {
+            "Configured sources are not supported by this backend."
+        }
+        availableSubtitleTracks.clear()
+        availableSubtitleTracks.addAll(source.subtitles)
+        source.subtitles.firstOrNull()?.let { selectSubtitleTrack(it) }
+        openUri(source.uri, initializeplayerState)
+    }
+
     // Properties related to media state
     val hasMedia: Boolean
 

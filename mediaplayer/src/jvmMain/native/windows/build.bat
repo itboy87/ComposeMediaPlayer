@@ -57,4 +57,10 @@ if exist build-arm64 rmdir /s /q build-arm64
 echo x64 DLL: ..\..\resources\composemediaplayer\native\win32-x86-64\NativeVideoPlayer.dll
 echo ARM64 DLL: ..\..\resources\composemediaplayer\native\win32-arm64\NativeVideoPlayer.dll
 
+if defined NATIVE_LIBS_OUTPUT_DIR (
+    python "%~dp0..\..\..\..\..\tools\legacy_native_manifest.py" --write windows "%NATIVE_LIBS_OUTPUT_DIR%"
+) else (
+    python "%~dp0..\..\..\..\..\tools\legacy_native_manifest.py" --write windows "%~dp0..\..\resources\composemediaplayer\native"
+)
+if %ERRORLEVEL% neq 0 exit /b %ERRORLEVEL%
 endlocal

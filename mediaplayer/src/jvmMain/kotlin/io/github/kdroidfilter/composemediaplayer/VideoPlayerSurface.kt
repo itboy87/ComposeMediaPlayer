@@ -1,6 +1,8 @@
 package io.github.kdroidfilter.composemediaplayer
 
 import androidx.compose.runtime.Composable
+import io.github.kdroidfilter.composemediaplayer.desktop.DashVideoPlayerState
+import io.github.kdroidfilter.composemediaplayer.desktop.DashVideoPlayerSurface
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
@@ -34,6 +36,8 @@ actual fun VideoPlayerSurface(
 ) {
     if (playerState is DefaultVideoPlayerState) {
         when (val delegate = playerState.delegate) {
+            is DashVideoPlayerState -> DashVideoPlayerSurface(delegate, modifier, contentScale, overlay)
+            is PreviewableVideoPlayerState -> androidx.compose.foundation.layout.Box(modifier) { overlay() }
             is WindowsVideoPlayerState -> WindowsVideoPlayerSurface(delegate, modifier, contentScale, overlay)
             is MacVideoPlayerState -> MacVideoPlayerSurface(delegate, modifier, contentScale, overlay)
             is LinuxVideoPlayerState -> LinuxVideoPlayerSurface(delegate, modifier, contentScale, overlay)

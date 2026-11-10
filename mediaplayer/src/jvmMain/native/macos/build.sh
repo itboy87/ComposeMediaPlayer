@@ -57,3 +57,5 @@ build_arch "x86_64"  "$X64_DIR"
 echo "=== Build completed ==="
 echo "arm64:  $ARM64_DIR/libNativeVideoPlayer.dylib"
 echo "x86_64: $X64_DIR/libNativeVideoPlayer.dylib"
+
+python3 "$SCRIPT_DIR/../../../../../tools/legacy_native_manifest.py" --write macos "$OUTPUT_DIR"

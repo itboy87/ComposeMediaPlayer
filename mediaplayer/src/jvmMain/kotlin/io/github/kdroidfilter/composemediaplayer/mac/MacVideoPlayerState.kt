@@ -6,7 +6,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asComposeImageBitmap
+import io.github.kdroidfilter.composemediaplayer.desktop.OwnedVideoFrame
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -203,7 +203,7 @@ class MacVideoPlayerState @JvmOverloads constructor(
     // Current frame management
     private var _currentFrame: Bitmap? by mutableStateOf(null)
     private val bitmapLock = ReentrantReadWriteLock()
-    internal val currentFrameState = mutableStateOf<ImageBitmap?>(null)
+    internal val currentFrameState = mutableStateOf<OwnedVideoFrame?>(null)
 
     // Aspect ratio — driven by the live frame (see syncAspectRatioToFrame).
     private var _aspectRatio by mutableStateOf(16f / 9f)
@@ -996,8 +996,12 @@ class MacVideoPlayerState @JvmOverloads constructor(
                 frameReceived = true
 
                 bitmapLock.write {
-                    _currentFrame = frameData.bitmap
-                    currentFrameState.value = frameData.bitmap.asComposeImageBitmap()
+                    if (!isDisposing.get()) {
+                        _currentFrame = frameData.bitmap
+                        val old = currentFrameState.value
+                        currentFrameState.value = OwnedVideoFrame(org.jetbrains.skia.Image.makeFromBitmap(frameData.bitmap))
+                        old?.close()
+                    }
                 }
 
                 // Don't clobber the timeline while the user is dragging or a seek is in flight: a
@@ -1466,6 +1470,7 @@ class MacVideoPlayerState @JvmOverloads constructor(
         // them once all holders drop their reference.
         bitmapLock.write {
             _currentFrame = null
+            currentFrameState.value?.close()
             currentFrameState.value = null
             for (i in skiaBitmaps.indices) skiaBitmaps[i] = null
             skiaBitmapWidth = 0

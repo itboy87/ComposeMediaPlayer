@@ -63,23 +63,29 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Validate macOS metadata startup
+      - name: Validate packaged playback and metadata startup
         run: |
           ./gradlew :mediaplayer:compileKotlinJvm :mediaplayer:jvmTest \
+            --tests '*NativeDashIntegrationTest' \
+            --tests '*NativeLifecycleIntegrationTest' \
+            --tests '*MediaHttpTest' \
+            --tests '*NativeRuntimeBundleTest' \
             --tests '*MacMetadataStartup*Test' --no-configuration-cache
         env:
+          COMPOSE_MEDIA_PLAYER_RUN_DASH_TEST: '1'
           COMPOSE_MEDIA_PLAYER_RUN_NATIVE_STARTUP_TEST: '1'
 
       # Targets only the GitHubPackages repository, so Maven Central is never touched by this
       # workflow even though the Maven Central publication is still configured in the build.
       - name: Publish to GitHub Packages
         run: |
-          VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$ ]] || { echo 'Invalid package version' >&2; exit 1; }
           echo "Publishing version $VERSION"
           ./gradlew :mediaplayer:publishAllPublicationsToGitHubPackagesRepository \
             --no-configuration-cache \
             -PprojectVersion="$VERSION"
         env:
+          VERSION: ${{ inputs.version }}
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -235,7 +235,8 @@ fun PlayerScreen(modifier: Modifier = Modifier, playerState: VideoPlayerState = 
                         is VideoPlayerError.CodecError -> "Codec: ${error.message}"
                         is VideoPlayerError.NetworkError -> "Network: ${error.message}"
                         is VideoPlayerError.SourceError -> "Source: ${error.message}"
-                        is VideoPlayerError.UnknownError -> "Error: ${error.message}"
+                        is VideoPlayerError.DrmError -> "DRM: ${error.message}"
+                    is VideoPlayerError.UnknownError -> "Error: ${error.message}"
                     },
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,

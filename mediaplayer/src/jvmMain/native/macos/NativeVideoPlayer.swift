@@ -4,6 +4,14 @@ import CoreVideo
 import Foundation
 import AppKit
 
+// Native release builds never emit URLs, credentials, or AVFoundation diagnostic payloads.
+private func nativeDiagnostic(_ message: @autoclosure () -> String) {
+#if DEBUG
+    let safe = message().replacingOccurrences(of: "https?://[^\\s]+", with: "[url]", options: .regularExpression)
+    Swift.print(safe)
+#endif
+}
+
 /// Class that manages video playback and frame capture into an optimized shared buffer.
 /// Frame capture rate adapts to the lower of screen refresh rate and video frame rate.
 /// Includes full HLS (HTTP Live Streaming) support with adaptive bitrate streaming.
@@ -203,7 +211,7 @@ class MacVideoPlayer {
     private func handleBufferEmpty(_ isEmpty: Bool) {
         if isEmpty {
             isBuffering = true
-            print("HLS: Buffer empty, buffering...")
+            nativeDiagnostic("HLS: Buffer empty, buffering...")
         }
     }
 
@@ -211,14 +219,14 @@ class MacVideoPlayer {
     private func handleBufferLikelyToKeepUp(_ isLikely: Bool) {
         if isLikely {
             isBuffering = false
-            print("HLS: Buffer recovered, playback can continue")
+            nativeDiagnostic("HLS: Buffer recovered, playback can continue")
         }
     }
 
     /// Handles buffer full state
     private func handleBufferFull(_ isFull: Bool) {
         if isFull {
-            print("HLS: Buffer is full")
+            nativeDiagnostic("HLS: Buffer is full")
         }
     }
 
@@ -268,7 +276,7 @@ class MacVideoPlayer {
         }
 
         // Log HLS streaming statistics
-        print("""
+        nativeDiagnostic("""
                   HLS Access Log:
                   - Indicated Bitrate: \(lastEvent.indicatedBitrate) bps
                   - Observed Bitrate: \(lastEvent.observedBitrate) bps
@@ -287,7 +295,7 @@ class MacVideoPlayer {
         errorCount += 1
         lastError = lastEvent.errorComment ?? "Unknown HLS error"
 
-        print("""
+        nativeDiagnostic("""
                   HLS Error Log:
                   - Error Domain: \(lastEvent.errorDomain)
                   - Error Code: \(lastEvent.errorStatusCode)
@@ -298,7 +306,7 @@ class MacVideoPlayer {
 
     /// Handles playback stalls
     @objc private func handlePlaybackStall(_ notification: Notification) {
-        print("HLS: Playback stalled, attempting to recover...")
+        nativeDiagnostic("HLS: Playback stalled, attempting to recover...")
         isBuffering = true
 
         // Attempt to recover from stall
@@ -325,11 +333,11 @@ class MacVideoPlayer {
 
                         if !availableBitrates.isEmpty {
                             availableBitrates.sort()
-                            print("HLS: Available bitrates: \(availableBitrates)")
+                            nativeDiagnostic("HLS: Available bitrates: \(availableBitrates)")
                         }
                     }
                 } catch {
-                    print("Error loading HLS variants: \(error.localizedDescription)")
+                    nativeDiagnostic("Error loading HLS variants: \(error.localizedDescription)")
                 }
             }
         }
@@ -339,7 +347,7 @@ class MacVideoPlayer {
     func setPreferredMaxBitrate(_ bitrate: Double) {
         preferredPeakBitRate = bitrate
         player?.currentItem?.preferredPeakBitRate = bitrate
-        print("HLS: Set preferred max bitrate to \(bitrate) bps")
+        nativeDiagnostic("HLS: Set preferred max bitrate to \(bitrate) bps")
     }
 
     /// Forces a specific bitrate (if available)
@@ -407,7 +415,7 @@ class MacVideoPlayer {
 
             return nil
         } catch {
-            print("Error detecting MIME type: \(error.localizedDescription)")
+            nativeDiagnostic("Error detecting MIME type: \(error.localizedDescription)")
             return nil
         }
     }
@@ -434,7 +442,7 @@ class MacVideoPlayer {
                         }
                     }
                 } catch {
-                    print("Error loading metadata: \(error.localizedDescription)")
+                    nativeDiagnostic("Error loading metadata: \(error.localizedDescription)")
                 }
             }
         } else {
@@ -471,10 +479,10 @@ class MacVideoPlayer {
                                     // Calculate bitrate: (fileSize * 8) / durationInSeconds
                                     let calculatedBitrate = Int64(Double(fileSizeInBytes * 8) / durationInSeconds)
                                     videoBitrate = calculatedBitrate
-                                    print("Calculated bitrate from file size: \(calculatedBitrate) bits/s")
+                                    nativeDiagnostic("Calculated bitrate from file size: \(calculatedBitrate) bits/s")
                                 }
                             } catch {
-                                print("Error loading duration: \(error.localizedDescription)")
+                                nativeDiagnostic("Error loading duration: \(error.localizedDescription)")
                             }
                         }
                     } else {
@@ -484,14 +492,14 @@ class MacVideoPlayer {
                             // Calculate bitrate: (fileSize * 8) / durationInSeconds
                             let calculatedBitrate = Int64(Double(fileSizeInBytes * 8) / durationInSeconds)
                             videoBitrate = calculatedBitrate
-                            print("Calculated bitrate from file size: \(calculatedBitrate) bits/s")
+                            nativeDiagnostic("Calculated bitrate from file size: \(calculatedBitrate) bits/s")
                         }
                     }
                 }
             } catch {
                 // This is expected for HLS streams
                 if !isHLSStream {
-                    print("Error getting file attributes: \(error.localizedDescription)")
+                    nativeDiagnostic("Error getting file attributes: \(error.localizedDescription)")
                 }
             }
         }
@@ -512,10 +520,10 @@ class MacVideoPlayer {
                                 let estimatedDataRate = try await videoTrack.load(.estimatedDataRate)
                                 if estimatedDataRate > 0 && !isHLSStream {
                                     videoBitrate = Int64(estimatedDataRate)
-                                    print("Got bitrate from estimatedDataRate: \(videoBitrate) bits/s")
+                                    nativeDiagnostic("Got bitrate from estimatedDataRate: \(videoBitrate) bits/s")
                                 }
                             } catch {
-                                print("Error getting estimatedDataRate: \(error.localizedDescription)")
+                                nativeDiagnostic("Error getting estimatedDataRate: \(error.localizedDescription)")
                             }
                         }
 
@@ -527,7 +535,7 @@ class MacVideoPlayer {
                                let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
                                let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
                                 videoBitrate = avgBitrate
-                                print("Got bitrate from format description: \(videoBitrate) bits/s")
+                                nativeDiagnostic("Got bitrate from format description: \(videoBitrate) bits/s")
                             }
 
                             // Get MIME type for non-HLS content
@@ -565,7 +573,7 @@ class MacVideoPlayer {
                         }
                     }
                 } catch {
-                    print("Error extracting metadata: \(error.localizedDescription)")
+                    nativeDiagnostic("Error extracting metadata: \(error.localizedDescription)")
                 }
             }
         } else {
@@ -576,7 +584,7 @@ class MacVideoPlayer {
                 let estimatedDataRate = videoTrack.estimatedDataRate
                 if estimatedDataRate > 0 && !isHLSStream {
                     videoBitrate = Int64(estimatedDataRate)
-                    print("Got bitrate from estimatedDataRate (legacy): \(videoBitrate) bits/s")
+                    nativeDiagnostic("Got bitrate from estimatedDataRate (legacy): \(videoBitrate) bits/s")
                 }
 
                 if let formatDescriptions = videoTrack.formatDescriptions as? [CMFormatDescription],
@@ -586,7 +594,7 @@ class MacVideoPlayer {
                        let bitrate = dict[kCMFormatDescriptionExtension_VerbatimSampleDescription] as? Dictionary<String, Any>,
                        let avgBitrate = bitrate["avg-bitrate"] as? Int64 {
                         videoBitrate = avgBitrate
-                        print("Got bitrate from format description (legacy): \(videoBitrate) bits/s")
+                        nativeDiagnostic("Got bitrate from format description (legacy): \(videoBitrate) bits/s")
                     }
 
                     // Get MIME type for non-HLS content
@@ -637,7 +645,7 @@ class MacVideoPlayer {
 
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
             guard let videoTrack = tracks?.first, error == nil else {
-                print(
+                nativeDiagnostic(
                     "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
                 )
                 return
@@ -657,7 +665,7 @@ class MacVideoPlayer {
                         // Set capture rate to the lower of the two rates
                         self.updateCaptureFrameRate()
                     } catch {
-                        print("Error loading nominal frame rate: \(error.localizedDescription)")
+                        nativeDiagnostic("Error loading nominal frame rate: \(error.localizedDescription)")
                         // Fallback to common default if detection fails
                         self.videoFrameRate = 30.0
                         self.updateCaptureFrameRate()
@@ -707,7 +715,7 @@ class MacVideoPlayer {
         isHLSStream = isHLSUrl(url)
 
         if isHLSStream {
-            print("Detected HLS stream: \(url)")
+            nativeDiagnostic("Detected HLS stream: \(url)")
         }
 
         let mimeType = detectMimeType(at:url)
@@ -726,7 +734,7 @@ class MacVideoPlayer {
         // Retrieve the video track to obtain the actual dimensions
         asset.loadTracks(withMediaType: .video) { [self] tracks, error in
             guard let videoTrack = tracks?.first, error == nil else {
-                print(
+                nativeDiagnostic(
                     "Error loading video tracks: \(error?.localizedDescription ?? "Unknown")"
                 )
                 // For HLS streams without video track info yet, use default dimensions
@@ -764,7 +772,7 @@ class MacVideoPlayer {
                         // Continue with player setup
                         self.setupVideoOutputAndPlayer(with: asset, videoComposition: videoComposition)
                     } catch {
-                        print("Error loading video track properties: \(error.localizedDescription)")
+                        nativeDiagnostic("Error loading video track properties: \(error.localizedDescription)")
                         // Use default dimensions for HLS if loading fails
                         if self.isHLSStream {
                             self.frameWidth = 1920
@@ -1017,7 +1025,7 @@ class MacVideoPlayer {
         let status = MTAudioProcessingTapGetSourceAudio(
             tap, numberFrames, bufferListInOut, flagsOut, nil, nil)
         if status != noErr {
-            print("MTAudioProcessingTapGetSourceAudio failed with status: \(status)")
+            nativeDiagnostic("MTAudioProcessingTapGetSourceAudio failed with status: \(status)")
             return
         }
 
@@ -1027,18 +1035,18 @@ class MacVideoPlayer {
     // In the setupAudioTap method, add audio format verification and logging
     private func setupAudioTap(for playerItem: AVPlayerItem) {
         guard let asset = playerItem.asset as? AVURLAsset else {
-            print("Asset is not an AVURLAsset")
+            nativeDiagnostic("Asset is not an AVURLAsset")
             return
         }
 
         // Load audio tracks asynchronously
         asset.loadTracks(withMediaType: .audio) { tracks, error in
             guard let audioTrack = tracks?.first, error == nil else {
-                print("No audio track found or error: \(error?.localizedDescription ?? "unknown")")
+                nativeDiagnostic("No audio track found or error: \(error?.localizedDescription ?? "unknown")")
                 return
             }
 
-            print("Audio track found, setting up tap")
+            nativeDiagnostic("Audio track found, setting up tap")
 
             // Create input parameters with a processing tap
             let inputParams = AVMutableAudioMixInputParameters(track: audioTrack)
@@ -1062,13 +1070,13 @@ class MacVideoPlayer {
                 kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
             )
             if status == noErr, let tap = tap {
-                print("Audio tap created successfully")
+                nativeDiagnostic("Audio tap created successfully")
                 inputParams.audioTapProcessor = tap
                 let audioMix = AVMutableAudioMix()
                 audioMix.inputParameters = [inputParams]
                 playerItem.audioMix = audioMix
             } else {
-                print("Audio Tap creation failed with status: \(status)")
+                nativeDiagnostic("Audio Tap creation failed with status: \(status)")
             }
             #else
             var tap: Unmanaged<MTAudioProcessingTap>?
@@ -1076,13 +1084,13 @@ class MacVideoPlayer {
                 kCFAllocatorDefault, &callbacks, kMTAudioProcessingTapCreationFlag_PostEffects, &tap
             )
             if status == noErr, let tap = tap?.takeRetainedValue() {
-                print("Audio tap created successfully")
+                nativeDiagnostic("Audio tap created successfully")
                 inputParams.audioTapProcessor = tap
                 let audioMix = AVMutableAudioMix()
                 audioMix.inputParameters = [inputParams]
                 playerItem.audioMix = audioMix
             } else {
-                print("Audio Tap creation failed with status: \(status)")
+                nativeDiagnostic("Audio Tap creation failed with status: \(status)")
             }
             #endif
         }
@@ -1138,7 +1146,7 @@ class MacVideoPlayer {
                             playerItem.audioMix = audioMix
                         }
                     } catch {
-                        print("Error loading audio tracks for volume adjustment: \(error.localizedDescription)")
+                        nativeDiagnostic("Error loading audio tracks for volume adjustment: \(error.localizedDescription)")
                     }
                 }
             } else {
@@ -1413,7 +1421,7 @@ public func openUri(_ context: UnsafeMutableRawPointer?, _ uri: UnsafePointer<CC
           let uriCStr = uri,
           let swiftUri = String(validatingUTF8: uriCStr)
     else {
-        print("Invalid parameters for openUri")
+        nativeDiagnostic("Invalid parameters for openUri")
         return
     }
     let player = Unmanaged<MacVideoPlayer>.fromOpaque(context).takeUnretainedValue()

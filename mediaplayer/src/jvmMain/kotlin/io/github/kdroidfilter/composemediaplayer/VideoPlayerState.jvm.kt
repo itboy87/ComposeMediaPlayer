@@ -1,6 +1,11 @@
 package io.github.kdroidfilter.composemediaplayer
 
-import androidx.compose.runtime.Stable
+import androidx.compose.runtime.*
+import io.github.kdroidfilter.composemediaplayer.desktop.*
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.*
+import java.net.URI
+import java.util.concurrent.atomic.AtomicLong
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import io.github.kdroidfilter.composemediaplayer.linux.LinuxVideoPlayerState
@@ -38,17 +43,102 @@ actual fun createVideoPlayerState(
  */
 @Stable
 open class DefaultVideoPlayerState : VideoPlayerState {
-    val delegate: VideoPlayerState =
-        when (CurrentPlatform.os) {
-            CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
-            CurrentPlatform.OS.MAC -> MacVideoPlayerState()
-            CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
+    var delegate: VideoPlayerState by mutableStateOf(PreviewableVideoPlayerState(hasMedia = false, isPlaying = false, loop = false, sliderPos = 0f, currentTime = 0.0, duration = 0.0))
+        private set
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val generation = AtomicLong()
+    private var opening: Job? = null
+    private val lifecycle = MutableSharedFlow<PlaybackEvent>(replay = 1, extraBufferCapacity = 64)
+    private val lifecycleQueue = kotlinx.coroutines.channels.Channel<PlaybackEvent>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    private val lifecycleWriter = scope.launch { for (event in lifecycleQueue) lifecycle.emit(event) }
+    override val events: Flow<PlaybackEvent> = lifecycle.asSharedFlow()
+    private var routingLoading by mutableStateOf(false)
+    private var routingError: VideoPlayerError? by mutableStateOf(null)
+    @Volatile private var disposed = false
+    private var lastSource: MediaSource? = null
+    private var widevineRuntime: WidevineRuntime? = null
+    fun configureWidevine(runtime: WidevineRuntime) { widevineRuntime = runtime }
+    private fun event(id: Long, type: PlaybackEvent.Type, error: VideoPlayerError? = null) {
+        lifecycleQueue.trySend(PlaybackEvent(id, type, error))
+    }
+    override fun openSource(source: MediaSource, initializeplayerState: InitialPlayerState) {
+        if (disposed) return
+        lastSource = source
+        val previous = generation.getAndIncrement()
+        if (previous > 0) event(previous, PlaybackEvent.Type.REPLACED)
+        val id = generation.get()
+        opening?.cancel()
+        routingLoading = true
+        routingError = null
+        val old = delegate
+        opening = scope.launch {
+            try {
+                old.dispose()
+                if (old is DashVideoPlayerState) old.awaitDisposed()
+                ensureActive()
+                event(id, PlaybackEvent.Type.OPENING)
+                val uri = URI(source.uri)
+                var dash = source.widevine != null || source.mimeType?.substringBefore(';')?.equals("application/dash+xml", true) == true || uri.path.orEmpty().endsWith(".mpd", true)
+                if (!dash && uri.scheme in listOf("http", "https") && '.' !in uri.path.orEmpty().substringAfterLast('/')) {
+                    val probe = MediaHttp()
+                    try {
+                        probe.open(source.uri, source.headers).use { response ->
+                            val prefix = response.connection.inputStream.use { it.readNBytes(2048) }.toString(Charsets.UTF_8)
+                            dash = response.connection.contentType.orEmpty().substringBefore(';').equals("application/dash+xml", true) || prefix.contains(Regex("<(?:[A-Za-z0-9_]+:)?MPD(?:\\s|>)"))
+                        }
+                    } finally { probe.close() }
+                }
+                val next: VideoPlayerState = if (dash || source.headers.isNotEmpty()) {
+                    require(CurrentPlatform.os != CurrentPlatform.OS.LINUX) { "Configured DASH playback currently supports macOS and Windows." }
+                    DashVideoPlayerState(widevineRuntime)
+                } else when (CurrentPlatform.os) {
+                    CurrentPlatform.OS.MAC -> MacVideoPlayerState()
+                    CurrentPlatform.OS.WINDOWS -> WindowsVideoPlayerState()
+                    CurrentPlatform.OS.LINUX -> LinuxVideoPlayerState()
+                }
+                if (id != generation.get() || disposed) { next.dispose(); return@launch }
+                next.volume = old.volume
+                next.loop = old.loop
+                next.playbackSpeed = old.playbackSpeed
+                next.isFullscreen = old.isFullscreen
+                next.subtitleTextStyle = old.subtitleTextStyle
+                next.subtitleBackgroundColor = old.subtitleBackgroundColor
+                next.onPlaybackEnded = { event(id, PlaybackEvent.Type.COMPLETED); onPlaybackEndedCallback?.invoke() }
+                next.onRestart = { onRestartCallback?.invoke() }
+                delegate = next
+                if (next is DashVideoPlayerState) next.openSource(source, initializeplayerState)
+                else {
+                    next.availableSubtitleTracks.addAll(source.subtitles)
+                    source.subtitles.firstOrNull()?.let(next::selectSubtitleTrack)
+                    next.openUri(source.uri, initializeplayerState)
+                }
+                routingLoading = false
+                var ready = false
+                var playing: Boolean? = null
+                while (isActive && id == generation.get()) {
+                    next.error?.let { event(id, PlaybackEvent.Type.FAILED, it); return@launch }
+                    if (!ready && next.hasMedia) { ready = true; event(id, PlaybackEvent.Type.READY) }
+                    if (ready && playing != next.isPlaying) {
+                        playing = next.isPlaying
+                        event(id, if (playing) PlaybackEvent.Type.PLAYING else PlaybackEvent.Type.PAUSED)
+                    }
+                    delay(20)
+                }
+            } catch (cancel: CancellationException) { throw cancel }
+            catch (_: Throwable) {
+                if (id == generation.get()) {
+                    routingError = VideoPlayerError.SourceError("Unable to open the configured media source.")
+                    routingLoading = false
+                    event(id, PlaybackEvent.Type.FAILED, routingError)
+                }
+            }
         }
+    }
 
     override val hasMedia: Boolean get() = delegate.hasMedia
     override val isPlaying: Boolean get() = delegate.isPlaying
-    override val isLoading: Boolean get() = delegate.isLoading
-    override val error: VideoPlayerError? get() = delegate.error
+    override val isLoading: Boolean get() = routingLoading || delegate.isLoading
+    override val error: VideoPlayerError? get() = routingError ?: delegate.error
     override var volume: Float
         get() = delegate.volume
         set(value) {
@@ -85,9 +175,13 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override val metadata: VideoMetadata get() = delegate.metadata
     override val aspectRatio: Float get() = delegate.aspectRatio
 
-    override var subtitlesEnabled = delegate.subtitlesEnabled
-    override var currentSubtitleTrack: SubtitleTrack? = delegate.currentSubtitleTrack
-    override val availableSubtitleTracks = delegate.availableSubtitleTracks
+    override var subtitlesEnabled: Boolean
+        get() = delegate.subtitlesEnabled
+        set(value) { delegate.subtitlesEnabled = value }
+    override var currentSubtitleTrack: SubtitleTrack?
+        get() = delegate.currentSubtitleTrack
+        set(value) { delegate.currentSubtitleTrack = value }
+    override val availableSubtitleTracks get() = delegate.availableSubtitleTracks
     override var subtitleTextStyle: TextStyle
         get() = delegate.subtitleTextStyle
         set(value) {
@@ -117,38 +211,42 @@ open class DefaultVideoPlayerState : VideoPlayerState {
     override fun openUri(
         uri: String,
         initializeplayerState: InitialPlayerState,
-    ) = delegate.openUri(uri, initializeplayerState)
+    ) = openSource(MediaSource(uri), initializeplayerState)
 
     override fun openFile(
         file: PlatformFile,
         initializeplayerState: InitialPlayerState,
-    ) = delegate.openUri(file.file.path, initializeplayerState)
+    ) = openSource(MediaSource(file.file.toURI().toString()), initializeplayerState)
 
-    override fun play() = delegate.play()
+    override fun play() {
+        if (!delegate.hasMedia && lastSource != null) openSource(lastSource!!, InitialPlayerState.PLAY) else delegate.play()
+    }
 
     override fun pause() = delegate.pause()
 
-    override fun stop() = delegate.stop()
+    override fun stop() { val id = generation.getAndIncrement(); opening?.cancel(); routingLoading = false; delegate.stop(); event(id, PlaybackEvent.Type.STOPPED) }
 
     override fun seekTo(value: Float) = delegate.seekTo(value)
 
     override fun toggleFullscreen() = delegate.toggleFullscreen()
 
-    override fun dispose() = delegate.dispose()
+    override fun dispose() {
+        if (disposed) return
+        disposed = true
+        opening?.cancel()
+        scope.launch { delegate.dispose(); event(generation.get(), PlaybackEvent.Type.DISPOSED); lifecycleQueue.close(); lifecycleWriter.join(); scope.cancel() }
+    }
 
+    private var onPlaybackEndedCallback: (() -> Unit)? = null
+    private var onRestartCallback: (() -> Unit)? = null
     override var onPlaybackEnded: (() -> Unit)?
-        get() = delegate.onPlaybackEnded
-        set(value) {
-            delegate.onPlaybackEnded = value
-        }
-
+        get() = onPlaybackEndedCallback
+        set(value) { onPlaybackEndedCallback = value }
     override var onRestart: (() -> Unit)?
-        get() = delegate.onRestart
-        set(value) {
-            delegate.onRestart = value
-        }
+        get() = onRestartCallback
+        set(value) { onRestartCallback = value }
 
     override fun restart() = delegate.restart()
 
-    override fun clearError() = delegate.clearError()
+    override fun clearError() { routingError = null; delegate.clearError() }
 }

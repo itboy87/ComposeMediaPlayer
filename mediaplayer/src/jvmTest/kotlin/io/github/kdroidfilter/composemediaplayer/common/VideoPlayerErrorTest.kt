@@ -124,6 +124,7 @@ class VideoPlayerErrorTest {
                     is VideoPlayerError.CodecError -> "Codec: ${error.message}"
                     is VideoPlayerError.NetworkError -> "Network: ${error.message}"
                     is VideoPlayerError.SourceError -> "Source: ${error.message}"
+                    is VideoPlayerError.DrmError -> "DRM: ${error.message}"
                     is VideoPlayerError.UnknownError -> "Unknown: ${error.message}"
                 }
 
@@ -131,6 +132,7 @@ class VideoPlayerErrorTest {
                 is VideoPlayerError.CodecError -> assertEquals("Codec: Codec error", message)
                 is VideoPlayerError.NetworkError -> assertEquals("Network: Network error", message)
                 is VideoPlayerError.SourceError -> assertEquals("Source: Source error", message)
+                is VideoPlayerError.DrmError -> assertTrue(message.startsWith("DRM:"))
                 is VideoPlayerError.UnknownError -> assertEquals("Unknown: Unknown error", message)
             }
         }

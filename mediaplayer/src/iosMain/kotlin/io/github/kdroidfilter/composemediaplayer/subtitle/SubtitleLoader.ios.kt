@@ -71,3 +71,8 @@ actual suspend fun loadSubtitleContent(src: String): String =
             ""
         }
     }
+
+actual suspend fun loadSubtitleContent(src: String, headers: Map<String, String>): String {
+    require(headers.isEmpty()) { "Subtitle request headers are not supported by this backend." }
+    return loadSubtitleContent(src)
+}
