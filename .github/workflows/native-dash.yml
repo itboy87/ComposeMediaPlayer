@@ -32,6 +32,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
+      - name: Select the SDK-compatible Apple tools
+        if: runner.os == 'macOS'
+        run: echo 'DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer' >> "$GITHUB_ENV"
       - uses: actions/setup-java@v5
         with:
           distribution: ${{ matrix.platform == 'win32-arm64' && 'microsoft' || 'temurin' }}
