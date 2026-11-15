@@ -1,6 +1,7 @@
 package io.github.kdroidfilter.composemediaplayer.mac
 
 import com.sun.net.httpserver.HttpServer
+import io.github.kdroidfilter.composemediaplayer.createVideoPlayerState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -22,7 +23,11 @@ class MacMetadataStartupNativeTest {
     fun `opaque source with unknown MIME waits for cold metadata without recreating the player`() =
         verifySlowStartup("getvid")
 
-    private fun verifySlowStartup(path: String) = runBlocking {
+    @Test
+    fun `public player routing accepts an opaque source whose first response takes sixteen seconds`() =
+        verifySlowStartup("getvid", routeThroughPublicPlayer = true)
+
+    private fun verifySlowStartup(path: String, routeThroughPublicPlayer: Boolean = false) = runBlocking {
         assumeTrue(System.getenv("COMPOSE_MEDIA_PLAYER_RUN_NATIVE_STARTUP_TEST") == "1")
         assumeTrue(System.getProperty("os.name").startsWith("Mac", ignoreCase = true))
         val media = checkNotNull(javaClass.getResourceAsStream("/startup/metadata-startup.mp4")).use { it.readBytes() }
@@ -50,7 +55,7 @@ class MacMetadataStartupNativeTest {
             }
         }
         server.start()
-        val player = MacVideoPlayerState()
+        val player = if (routeThroughPublicPlayer) createVideoPlayerState() else MacVideoPlayerState()
         try {
             player.openUri("http://127.0.0.1:${server.address.port}/$path")
             withTimeout(40_000L) {

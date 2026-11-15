@@ -3,10 +3,39 @@ package io.github.kdroidfilter.composemediaplayer.desktop
 import com.sun.net.httpserver.HttpServer
 import io.github.kdroidfilter.composemediaplayer.*
 import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.test.*
 
 class MediaHttpTest {
+    @Test fun responseTimeoutCanBeExtendedForColdFormatDetection() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/") { request ->
+            try {
+                Thread.sleep(300)
+                val data = "media".encodeToByteArray()
+                request.sendResponseHeaders(200, data.size.toLong())
+                request.responseBody.use { it.write(data) }
+            } catch (_: java.io.IOException) {
+                // The short-budget request deliberately closes before this response.
+            } finally {
+                request.close()
+            }
+        }
+        server.start()
+        val uri = "http://127.0.0.1:${server.address.port}/"
+        try {
+            MediaHttp(readTimeoutMillis = 100).use { http ->
+                assertFailsWith<SocketTimeoutException> { http.open(uri).use { it.bytes() } }
+            }
+            MediaHttp(readTimeoutMillis = 2_000).use { http ->
+                assertContentEquals("media".encodeToByteArray(), http.open(uri).use { it.bytes() })
+            }
+        } finally {
+            server.stop(0)
+        }
+    }
+
     @Test fun crossOriginRedirectDropsCredentialsAndLicenseBytesStayRaw() {
         val observed = AtomicReference<String?>()
         val range = AtomicReference<String?>()

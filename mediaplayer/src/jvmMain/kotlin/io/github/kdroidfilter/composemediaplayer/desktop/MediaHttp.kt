@@ -23,7 +23,7 @@ internal fun httpOrigin(uri: URI): String {
 }
 
 /** Blocking transport, called only by IO workers. Closing it aborts every outstanding request. */
-internal class MediaHttp : AutoCloseable {
+internal class MediaHttp(private val readTimeoutMillis: Int = 15_000) : AutoCloseable {
     private val connections = ConcurrentHashMap.newKeySet<HttpURLConnection>()
     @Volatile private var closed = false
 
@@ -58,7 +58,7 @@ internal class MediaHttp : AutoCloseable {
                 check(!closed) { "Request cancelled." }
                 connection.instanceFollowRedirects = false
                 connection.connectTimeout = 10_000
-                connection.readTimeout = 15_000
+                connection.readTimeout = readTimeoutMillis
                 connection.requestMethod = method
                 connection.setRequestProperty("Accept-Encoding", "identity")
                 headers.forEach { (name, value) ->

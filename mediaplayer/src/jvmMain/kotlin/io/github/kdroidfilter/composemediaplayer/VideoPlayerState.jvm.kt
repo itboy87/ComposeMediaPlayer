@@ -80,7 +80,10 @@ open class DefaultVideoPlayerState : VideoPlayerState {
                 val uri = URI(source.uri)
                 var dash = source.widevine != null || source.mimeType?.substringBefore(';')?.equals("application/dash+xml", true) == true || uri.path.orEmpty().endsWith(".mpd", true)
                 if (!dash && uri.scheme in listOf("http", "https") && '.' !in uri.path.orEmpty().substringAfterLast('/')) {
-                    val probe = MediaHttp()
+                    // Format detection is part of cold startup. Keep the same response
+                    // allowance as macOS metadata loading so a valid slow opaque URL
+                    // reaches the native player instead of failing at the transport default.
+                    val probe = MediaHttp(readTimeoutMillis = 30_000)
                     try {
                         probe.open(source.uri, source.headers).use { response ->
                             val prefix = response.connection.inputStream.use { it.readNBytes(2048) }.toString(Charsets.UTF_8)
